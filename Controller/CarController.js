@@ -1,6 +1,21 @@
 import { Cars, User } from "../db/Model.js";
-import fs from "fs";
-import path from "path";
+import crypto from "crypto";
+
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+export const BUCKET = process.env.AWS_BUCKET_NAME;
+export const REGION =process.env.AWS_REGION
+
+export const s3 = new S3Client({
+  region: REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
 // add cars
 const addCars = async (req, res) => {
   const files = req.files;
@@ -29,7 +44,26 @@ const addCars = async (req, res) => {
     let images = [];
 
     if(files){
-      images = files.map((file) => `/public/${file.filename}`);
+      const uploads = await Promise.all(
+        files?.map(async (file) => {
+          const key = `uploads/${crypto.randomUUID()}-${file.originalname}`;
+  
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: BUCKET,
+              Key: key,
+              Body: file.buffer,
+              ContentType: file.mimetype,
+              // ACL: "public-read",             // 👈 makes URL permanent (optional)
+            })
+          );
+  
+          // permanent public URL
+          const url = `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
+          images.push(url);
+          return { key, url };
+        })
+      );
     }
 
     
@@ -53,7 +87,7 @@ const addCars = async (req, res) => {
       addOnCharge,
       features,
       admin_id: userId,
-    });
+    }); 
     await newCar.save();
     res
       .status(201)
@@ -82,46 +116,64 @@ const editCar = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Please fill all fields" }); }
 
-        if (deleteImages && deleteImages.length > 0) {
-          try {
-            const deleteImageFiles = (images) => {
-              images.forEach(image => {
-                const filePath = path.join('/mnt', image);
-                if (fs.existsSync(filePath)) {
-                  fs.unlinkSync(filePath);
-                } else {
-                  console.log(`File not found: ${filePath}`);
-                }
-              });
-            };
-    
-            if (typeof deleteImages === 'string') {
-              deleteImageFiles([deleteImages]);
-            } else {
-              deleteImageFiles(deleteImages);
-            }
-          } catch (err) {
-            return res.status(500).json({ success: false, message: "Error deleting images", error: err });
-          }
-        }
-    
-     
-        let newImages = [];
-        try{
-          if (files && files.length > 0) {
-            const imagesLink = files.map(file => `/public/${file.filename}`);
-            if (images) {
-              newImages = typeof images === 'string' ? [images, ...imagesLink] : [...images, ...imagesLink];
-            }else {
-              newImages = imagesLink;
-            }
-          } else if (images) {
-            newImages = typeof images === 'string' ? [images] : images;
-          }
+        // --------------------------
+    // 1️⃣ DELETE IMAGES FROM S3
+    // --------------------------
+    if (deleteImages && deleteImages.length > 0) {
+      const toDelete = Array.isArray(deleteImages) ? deleteImages : [deleteImages];
 
-        }catch(err){
-          return res.status(500).json({ success: false, message: "Error adding images", error: err });
-        }
+      await Promise.all(
+        toDelete.map(async (url) => {
+          // extract key from URL
+          const key = url.split(".amazonaws.com/")[1];
+
+          if (!key) return;
+
+          await s3.send(
+            new DeleteObjectCommand({
+              Bucket: BUCKET,
+              Key: key,
+            })
+          );
+        })
+      );
+    }
+
+    // --------------------------
+    // 2️⃣ UPLOAD NEW FILES TO S3
+    // --------------------------
+    let newImages = [];
+
+    if (files && files.length > 0) {
+      const uploaded = await Promise.all(
+        files.map(async (file) => {
+          const key = `uploads/${crypto.randomUUID()}-${file.originalname}`;
+
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: BUCKET,
+              Key: key,
+              Body: file.buffer,
+              ContentType: file.mimetype,
+            })
+          );
+
+          // permanent public URL (bucket policy required)
+          const url = `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
+          return url;
+        })
+      );
+
+      if (images) {
+        newImages = Array.isArray(images) ? [...images, ...uploaded] : [images, ...uploaded];
+      } else {
+        newImages = uploaded;
+      }
+    } else if (images) {
+      newImages = Array.isArray(images) ? images : [images];
+    }
+
+
         const filtedFeat = features ? features.filter(feature => feature !== "") : []
     // const newImages = [...images, ...imagesLink];
     const newObj = {

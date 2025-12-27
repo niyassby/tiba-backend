@@ -11,6 +11,7 @@ import bookingRoute from "./Routes/bookingRoutes.js";
 import notificationRoute from "./Routes/NotificationRoutes.js";
 import userRoute from "./Routes/userRoutes.js";
 import paymentRoute from "./Routes/paymentRoutes.js";
+import { migrateurl } from "./Util/migrateUrl.js";
 dotenv.config();
 
 app.use(json());
@@ -23,7 +24,9 @@ app.use(cors({
       const allowedOrigins = [
           'https://tibarentacar.com',
           'https://www.tibarentacar.com',
-          'https://api.tibarentacar.com'
+          'https://api.tibarentacar.com',
+          'https://app.tibarentacar.com',
+          'http://localhost:5173'
       ];
       
       // Allow requests with no origin (like mobile apps or curl requests)
@@ -46,7 +49,7 @@ app.use("/api/booking", bookingRoute)
 app.use("/api/payment", paymentRoute)
 app.use("/api/notification", notificationRoute)
 app.use("/api/user", userRoute)
-
+ 
 
 
 app.get("/", (req, res) => {
@@ -59,6 +62,7 @@ app.get("/", (req, res) => {
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   dbConnection();
+  // migrateurl()
   console.log("Server running 🚀");
 });
 

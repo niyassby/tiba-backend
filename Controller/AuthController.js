@@ -4,6 +4,8 @@ import jwt from "jsonwebtoken";
 import { sendMail, transporter } from "../Util/SendMail.js";
 import dotenv from "dotenv";
 import { notification } from "./NotifictionController.js";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { BUCKET, REGION, s3 } from "./CarController.js";
 dotenv.config();
 
 // login controller
@@ -306,7 +308,21 @@ const editProfile = async (req, res) => {
     }
 
     if(file){
-      user.profileImg = `/public/${file.filename}`;
+      // user.profileImg = `/public/${file.filename}`;
+      const key = `uploads/${Date.now()}-${file.originalname}`;
+  
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: BUCKET,
+              Key: key,
+              Body: file.buffer,
+              ContentType: file.mimetype,
+              // ACL: "public-read",             // 👈 makes URL permanent (optional)
+            })
+          );
+  
+          // permanent public URL
+         user.profileImg = `https://${BUCKET}.s3.${REGION}.amazonaws.com/${key}`;
     }
 
     user.name = name;
@@ -314,6 +330,7 @@ const editProfile = async (req, res) => {
     return res.status(200).json({ success: true, message: "Profile updated successfully" });
 
   }catch (err) {
+    console.log(err);
     return res.status(500).json({ success: false, message: "Error to update profile" });
   }
 }
